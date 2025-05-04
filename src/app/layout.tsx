@@ -1,18 +1,11 @@
 import type { Metadata } from 'next';
-import { GeistSans } from 'geist/font/sans'; // Use correct import for Geist Sans
-import { GeistMono } from 'geist/font/mono'; // Use correct import for Geist Mono
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 
-const geistSans = GeistSans({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = GeistMono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
+// The imported objects `GeistSans` and `GeistMono` contain the font configuration,
+// including the CSS variable name. We don't call them as functions.
 
 export const metadata: Metadata = {
   title: 'Repo Insights',
@@ -26,7 +19,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans`}>
+      {/* Apply the font variables directly to the body class */}
+      <body className={`${GeistSans.variable} ${GeistMono.variable} antialiased font-sans`}>
         {children}
         <Toaster />
       </body>
