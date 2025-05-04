@@ -5,7 +5,7 @@ import * as React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { Github, Loader2, Users, Mail, GitPullRequest, GitCommit, MessageSquare, Building, ExternalLink, Info } from 'lucide-react';
+import { Github, Loader2, Users, Mail, GitPullRequest, GitCommit, MessageSquare, Building, ExternalLink, Info, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
 
 import { fetchContributorsAction } from '@/app/actions'; // Import the Server Action
 import { Button } from '@/components/ui/button';
@@ -46,7 +46,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [selectedContributor, setSelectedContributor] = React.useState<ContributorInfo | null>(null);
   const [repoName, setRepoName] = React.useState<string | null>(null); // Store repo name for context
-  const [errorOccurred, setErrorOccurred] = React.useState<boolean>(false); // Track if an error occurred
+  const [errorOccurred, setErrorOccurred] = React.useState<string | null>(null); // Track if an error occurred and store message
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -61,7 +61,7 @@ export default function Home() {
     setIsLoading(true);
     setContributors([]); // Clear previous results
     setSelectedContributor(null); // Clear selected contributor
-    setErrorOccurred(false); // Reset error state
+    setErrorOccurred(null); // Reset error state
     setRepoName(null); // Clear repo name
 
     const repoMatch = values.repo.match(/^(?:https?:\/\/github\.com\/)?([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)(?:\.git)?\/?$/);
@@ -72,7 +72,7 @@ export default function Home() {
             description: "Please enter a valid repository name (e.g., owner/repo) or URL.",
         });
         setIsLoading(false);
-        setErrorOccurred(true);
+        setErrorOccurred("Invalid repository format provided."); // Set error message
         return;
     }
     const currentRepoName = repoMatch[1];
@@ -81,48 +81,62 @@ export default function Home() {
 
     try {
       // Call the Server Action
+      console.log(`[Client] Calling fetchContributorsAction for ${currentRepoName}`);
       const result = await fetchContributorsAction(currentRepoName, values.token);
+      console.log(`[Client] Received result from fetchContributorsAction:`, result);
 
       if (result.success) {
         if (result.data.length === 0) {
            toast({
                title: "No Contributors Found",
-               description: `Could not find any contributors for ${currentRepoName}, or the repository might be private/inaccessible with the provided token.`,
+               description: `Could not find any contributors for ${currentRepoName}, or the repository might be private/inaccessible.`,
                variant: "default"
            });
+           setSelectedContributor(null); // Ensure details pane clears
+        } else {
+            setSelectedContributor(result.data[0]); // Select first contributor by default
         }
         setContributors(result.data);
-        if (result.data.length > 0) {
-            setSelectedContributor(result.data[0]);
-        }
+        // setErrorOccurred(null); // Ensure error state is clear on success
       } else {
         // Handle errors returned from the Server Action
-        console.error('Error fetching contributors via Server Action:', result.error);
+        const errorMessage = result.error || 'Failed to fetch contributor data. Please check details and try again.';
+        console.error('[Client] Error fetching contributors via Server Action:', errorMessage);
         toast({
           variant: 'destructive',
           title: 'Error Fetching Data',
-          description: result.error || 'Failed to fetch contributor data. Please check details and try again.',
+          description: errorMessage,
         });
-        setErrorOccurred(true);
+        setErrorOccurred(errorMessage); // Set error message
+        setContributors([]); // Clear any potential stale data
+        setSelectedContributor(null);
       }
 
     } catch (error) {
-      // Catch unexpected errors during the action call itself (less likely)
-      console.error('Unexpected error calling fetchContributorsAction:', error);
+      // Catch unexpected errors during the action call itself (e.g., network issues)
+       const clientErrorMessage = error instanceof Error ? error.message : 'An unexpected error occurred on the client side.';
+      console.error('[Client] Unexpected error calling fetchContributorsAction:', error);
       toast({
         variant: 'destructive',
         title: 'Client Error',
-        description: 'An unexpected error occurred on the client side.',
+        description: clientErrorMessage,
       });
-      setErrorOccurred(true);
+      setErrorOccurred(clientErrorMessage); // Set error message
+      setContributors([]); // Clear any potential stale data
+      setSelectedContributor(null);
     } finally {
+      console.log(`[Client] Finished processing request for ${currentRepoName}. Setting isLoading to false.`);
       setIsLoading(false);
     }
   }
 
+  // console.log("[Client Render] State:", { isLoading, contributorsLength: contributors.length, selectedContributor: selectedContributor?.username, errorOccurred, repoName, isSubmitted: form.formState.isSubmitted });
+
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center py-10 px-4">
-      <Card className="w-full max-w-4xl shadow-lg border border-border">
+      {/* Form Card - Always Visible */}
+      <Card className="w-full max-w-4xl shadow-lg border border-border mb-8">
         <CardHeader className="text-center">
           <div className="flex items-center justify-center gap-2 mb-2">
              <Github className="h-8 w-8 text-primary" />
@@ -181,10 +195,11 @@ export default function Home() {
         </CardContent>
       </Card>
 
+       {/* Loading Indicator */}
        {isLoading && (
-        <div className="mt-8 text-center w-full max-w-4xl">
+        <div className="w-full max-w-4xl">
            <Card className="shadow-md border border-border">
-             <CardContent className="pt-6">
+             <CardContent className="pt-6 flex flex-col items-center justify-center min-h-[200px]">
                 <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
                 <p className="mt-4 text-lg font-semibold text-foreground">Loading Contributor Data...</p>
                 <p className="mt-1 text-muted-foreground">Fetching details for {repoName || 'repository'}...</p>
@@ -193,8 +208,9 @@ export default function Home() {
         </div>
       )}
 
-      {!isLoading && contributors.length > 0 && (
-         <div className="mt-8 w-full max-w-4xl flex flex-col md:flex-row gap-6">
+       {/* Results Display - Only show if NOT loading AND there are contributors */}
+       {!isLoading && contributors.length > 0 && (
+         <div className="w-full max-w-4xl flex flex-col md:flex-row gap-6">
             {/* Contributor List */}
             <Card className="w-full md:w-1/3 shadow-md border border-border">
                  <CardHeader>
@@ -211,11 +227,6 @@ export default function Home() {
                                     className="w-full justify-start h-auto py-2 px-3 text-left items-center"
                                     onClick={() => setSelectedContributor(contributor)}
                                 >
-                                    {/* Placeholder for Avatar - consider adding later */}
-                                    {/* <Avatar className="h-6 w-6 mr-2">
-                                        <AvatarImage src={`https://github.com/${contributor.username}.png`} alt={contributor.username} />
-                                        <AvatarFallback>{contributor.username.charAt(0).toUpperCase()}</AvatarFallback>
-                                    </Avatar> */}
                                     <Github className="mr-2 h-4 w-4 flex-shrink-0 text-muted-foreground"/>
                                     <span className="truncate flex-grow font-medium">{contributor.username}</span>
                                     <Badge variant="outline" className="ml-auto flex-shrink-0 text-xs">{contributor.roleInfo.role}</Badge>
@@ -322,6 +333,7 @@ export default function Home() {
                             </Accordion>
                         </ScrollArea>
                     ) : (
+                         // Placeholder when no contributor is selected but results exist
                         <div className="h-[450px] flex items-center justify-center text-muted-foreground border border-dashed rounded-md">
                             <p>Select a contributor to view details.</p>
                         </div>
@@ -331,28 +343,39 @@ export default function Home() {
          </div>
       )}
 
-        {/* Display message when submitted but no results found and no loading */}
-        {!isLoading && form.formState.isSubmitted && contributors.length === 0 && !errorOccurred && (
-             <Alert variant="default" className="mt-8 w-full max-w-4xl shadow-md border border-border">
-               <Info className="h-4 w-4" />
-               <AlertTitle>No Contributors Found</AlertTitle>
-               <AlertDescription>
-                 No contributors were found for "{repoName}". This could be because the repository is empty, private (and the token lacks access), or uses a different contribution model.
-               </AlertDescription>
-             </Alert>
-        )}
+      {/* Placeholder/Info: Submitted but NO results */}
+      {!isLoading && form.formState.isSubmitted && contributors.length === 0 && !errorOccurred && (
+           <Alert variant="default" className="w-full max-w-4xl shadow-md border border-border">
+             <Info className="h-4 w-4" />
+             <AlertTitle>No Contributors Found</AlertTitle>
+             <AlertDescription>
+               No contributors were found for "{repoName}". This could be because the repository is empty, private (and the token lacks access), or uses a different contribution model.
+             </AlertDescription>
+           </Alert>
+      )}
 
-        {/* Display message when an error occurred */}
-         {!isLoading && errorOccurred && (
-              <Alert variant="destructive" className="mt-8 w-full max-w-4xl shadow-md">
-                <Info className="h-4 w-4" />
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>
-                  Failed to fetch contributor data for "{repoName}". Please check the repository name/link, ensure your GitHub token is valid and has the necessary permissions, and verify your network connection. See console for more details.
-                </AlertDescription>
-              </Alert>
-         )}
+      {/* Error Display - Only show if NOT loading AND an error occurred */}
+      {!isLoading && errorOccurred && (
+           <Alert variant="destructive" className="w-full max-w-4xl shadow-md">
+             <AlertTriangle className="h-4 w-4" /> {/* Use AlertTriangle for destructive */}
+             <AlertTitle>Error</AlertTitle>
+             <AlertDescription>
+               Failed to fetch contributor data for "{repoName || 'the repository'}".
+               <br />
+               Reason: {errorOccurred}
+               <br />
+               Please check the repository name/link, ensure your GitHub token is valid and has the necessary permissions, and verify your network connection.
+             </AlertDescription>
+           </Alert>
+      )}
 
+      {/* Initial State / Not Submitted Yet - Only show if NOT loading, NOT submitted, NO error */}
+      {!isLoading && !form.formState.isSubmitted && !errorOccurred && (
+          <div className="w-full max-w-4xl text-center text-muted-foreground mt-8">
+             {/* You could add an introductory message here if desired */}
+             {/* <p>Enter repository details above to get started.</p> */}
+          </div>
+      )}
 
     </div>
   );
