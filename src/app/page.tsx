@@ -5,8 +5,9 @@ import * as React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { Github, Loader2, Users, Mail, GitPullRequest, GitCommit, MessageSquare, Building, ExternalLink } from 'lucide-react';
+import { Github, Loader2, Users, Mail, GitPullRequest, GitCommit, MessageSquare, Building, ExternalLink, Info } from 'lucide-react';
 
+import { fetchContributorsAction } from '@/app/actions'; // Import the Server Action
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -20,7 +21,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { getRepoContributors } from '@/services/github';
+// Removed direct import of getRepoContributors as it's now called via Server Action
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -29,7 +30,8 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from "@/components/ui/accordion"
+} from "@/components/ui/accordion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
 // Schema for form validation
@@ -43,6 +45,8 @@ export default function Home() {
   const [contributors, setContributors] = React.useState<ContributorInfo[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [selectedContributor, setSelectedContributor] = React.useState<ContributorInfo | null>(null);
+  const [repoName, setRepoName] = React.useState<string | null>(null); // Store repo name for context
+  const [errorOccurred, setErrorOccurred] = React.useState<boolean>(false); // Track if an error occurred
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -57,6 +61,8 @@ export default function Home() {
     setIsLoading(true);
     setContributors([]); // Clear previous results
     setSelectedContributor(null); // Clear selected contributor
+    setErrorOccurred(false); // Reset error state
+    setRepoName(null); // Clear repo name
 
     const repoMatch = values.repo.match(/^(?:https?:\/\/github\.com\/)?([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)(?:\.git)?\/?$/);
     if (!repoMatch || !repoMatch[1]) {
@@ -66,50 +72,66 @@ export default function Home() {
             description: "Please enter a valid repository name (e.g., owner/repo) or URL.",
         });
         setIsLoading(false);
+        setErrorOccurred(true);
         return;
     }
-    const repoName = repoMatch[1];
+    const currentRepoName = repoMatch[1];
+    setRepoName(currentRepoName); // Store the repo name
 
 
     try {
-      // Call the actual service function to fetch data from GitHub API
-      const data = await getRepoContributors(repoName, values.token);
+      // Call the Server Action
+      const result = await fetchContributorsAction(currentRepoName, values.token);
 
-      if (data.length === 0) {
-         toast({
-             title: "No Contributors Found",
-             description: "Could not find any contributors for this repository, or the repository might be private/inaccessible with the provided token.",
-             variant: "default" // Use default variant for informational messages
-         });
-      }
-
-      setContributors(data);
-      // Select the first contributor by default if data is found
-      if (data.length > 0) {
-          setSelectedContributor(data[0]);
+      if (result.success) {
+        if (result.data.length === 0) {
+           toast({
+               title: "No Contributors Found",
+               description: `Could not find any contributors for ${currentRepoName}, or the repository might be private/inaccessible with the provided token.`,
+               variant: "default"
+           });
+        }
+        setContributors(result.data);
+        if (result.data.length > 0) {
+            setSelectedContributor(result.data[0]);
+        }
+      } else {
+        // Handle errors returned from the Server Action
+        console.error('Error fetching contributors via Server Action:', result.error);
+        toast({
+          variant: 'destructive',
+          title: 'Error Fetching Data',
+          description: result.error || 'Failed to fetch contributor data. Please check details and try again.',
+        });
+        setErrorOccurred(true);
       }
 
     } catch (error) {
-      console.error('Error fetching contributors:', error);
+      // Catch unexpected errors during the action call itself (less likely)
+      console.error('Unexpected error calling fetchContributorsAction:', error);
       toast({
         variant: 'destructive',
-        title: 'Error Fetching Data',
-        description: error instanceof Error ? error.message : 'Failed to fetch contributor data. Please check the repository name, token, permissions, and your network connection.',
+        title: 'Client Error',
+        description: 'An unexpected error occurred on the client side.',
       });
+      setErrorOccurred(true);
     } finally {
       setIsLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-secondary flex flex-col items-center py-10 px-4">
-      <Card className="w-full max-w-4xl shadow-lg">
+    <div className="min-h-screen bg-background flex flex-col items-center py-10 px-4">
+      <Card className="w-full max-w-4xl shadow-lg border border-border">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-bold flex items-center justify-center gap-2">
-             <Github className="h-8 w-8" /> Repo Insights
-          </CardTitle>
+          <div className="flex items-center justify-center gap-2 mb-2">
+             <Github className="h-8 w-8 text-primary" />
+             <CardTitle className="text-3xl font-bold">
+                Repo Insights
+             </CardTitle>
+          </div>
           <CardDescription>
-            Enter a GitHub repository name (owner/repo) or link and your GitHub token to view contributor details.
+            Enter a GitHub repository (owner/repo or link) and a Personal Access Token to view contributor details.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -122,7 +144,7 @@ export default function Home() {
                   <FormItem>
                     <FormLabel>Repository Name or Link</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., facebook/react or https://github.com/facebook/react" {...field} />
+                      <Input placeholder="e.g., facebook/react or https://github.com/facebook/react" {...field} className="bg-input"/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -135,10 +157,10 @@ export default function Home() {
                   <FormItem>
                     <FormLabel>GitHub Token</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="Enter your GitHub Personal Access Token" {...field} />
+                      <Input type="password" placeholder="Enter your GitHub Personal Access Token" {...field} className="bg-input"/>
                     </FormControl>
-                     <FormDescription>
-                       A Personal Access Token (classic or fine-grained) with 'repo' scope (or specific read access to the target repository) is required. Your token is used only for this request and is not stored.
+                     <FormDescription className="text-xs">
+                       A Personal Access Token (classic or fine-grained) with repository read access is required. Your token is sent securely to the server for this request and is not stored.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -160,32 +182,43 @@ export default function Home() {
       </Card>
 
        {isLoading && (
-        <div className="mt-8 text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-          <p className="mt-2 text-muted-foreground">Loading contributor data...</p>
+        <div className="mt-8 text-center w-full max-w-4xl">
+           <Card className="shadow-md border border-border">
+             <CardContent className="pt-6">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+                <p className="mt-4 text-lg font-semibold text-foreground">Loading Contributor Data...</p>
+                <p className="mt-1 text-muted-foreground">Fetching details for {repoName || 'repository'}...</p>
+             </CardContent>
+           </Card>
         </div>
       )}
 
       {!isLoading && contributors.length > 0 && (
          <div className="mt-8 w-full max-w-4xl flex flex-col md:flex-row gap-6">
             {/* Contributor List */}
-            <Card className="w-full md:w-1/3 shadow-md">
+            <Card className="w-full md:w-1/3 shadow-md border border-border">
                  <CardHeader>
-                    <CardTitle className="text-xl flex items-center gap-2"> <Users className="h-5 w-5" /> Contributors ({contributors.length})</CardTitle>
+                    <CardTitle className="text-xl flex items-center gap-2"> <Users className="h-5 w-5 text-primary" /> Contributors ({contributors.length})</CardTitle>
+                    <CardDescription>Select a contributor to view details.</CardDescription>
                  </CardHeader>
                  <CardContent className="p-0">
-                     <ScrollArea className="h-[400px] px-6">
-                         <div className="space-y-3">
+                     <ScrollArea className="h-[450px] px-4 pb-4">
+                         <div className="space-y-2">
                             {contributors.map((contributor) => (
                                 <Button
                                     key={contributor.username}
                                     variant={selectedContributor?.username === contributor.username ? "secondary" : "ghost"}
-                                    className="w-full justify-start h-auto py-2 px-3 text-left"
+                                    className="w-full justify-start h-auto py-2 px-3 text-left items-center"
                                     onClick={() => setSelectedContributor(contributor)}
                                 >
-                                    <Github className="mr-2 h-4 w-4 flex-shrink-0"/>
-                                    <span className="truncate flex-grow">{contributor.username}</span>
-                                    <Badge variant="outline" className="ml-auto flex-shrink-0">{contributor.roleInfo.role}</Badge>
+                                    {/* Placeholder for Avatar - consider adding later */}
+                                    {/* <Avatar className="h-6 w-6 mr-2">
+                                        <AvatarImage src={`https://github.com/${contributor.username}.png`} alt={contributor.username} />
+                                        <AvatarFallback>{contributor.username.charAt(0).toUpperCase()}</AvatarFallback>
+                                    </Avatar> */}
+                                    <Github className="mr-2 h-4 w-4 flex-shrink-0 text-muted-foreground"/>
+                                    <span className="truncate flex-grow font-medium">{contributor.username}</span>
+                                    <Badge variant="outline" className="ml-auto flex-shrink-0 text-xs">{contributor.roleInfo.role}</Badge>
                                 </Button>
                             ))}
                         </div>
@@ -194,84 +227,102 @@ export default function Home() {
             </Card>
 
              {/* Contributor Details */}
-             <Card className="w-full md:w-2/3 shadow-md flex-grow">
+             <Card className="w-full md:w-2/3 shadow-md border border-border flex-grow">
                  <CardHeader>
                     <CardTitle className="text-xl">Contributor Details</CardTitle>
                      <CardDescription>
-                       {selectedContributor ? `Showing details for ${selectedContributor.username}` : "Select a contributor from the list to see their details."}
+                       {selectedContributor ? `Showing details for ${selectedContributor.username}` : "Select a contributor from the list."}
                     </CardDescription>
                  </CardHeader>
                 <CardContent>
                     {selectedContributor ? (
-                         <ScrollArea className="h-[400px] pr-4">
+                         <ScrollArea className="h-[450px] pr-4 -mr-4"> {/* Offset padding for scrollbar */}
                             <Accordion type="multiple" defaultValue={['repo-info', 'external-info', 'personal-info']} className="w-full">
                                 {/* Repository Info */}
-                                <AccordionItem value="repo-info">
-                                    <AccordionTrigger className="text-lg font-semibold">Repository Information</AccordionTrigger>
-                                    <AccordionContent className="space-y-3 pl-2">
-                                        <p><strong>Role:</strong> <Badge variant="secondary">{selectedContributor.roleInfo.role}</Badge></p>
-                                        <p><strong>Permissions:</strong></p>
-                                        <div className="flex flex-wrap gap-1">
-                                            {selectedContributor.roleInfo.permissions.length > 0 ?
-                                             selectedContributor.roleInfo.permissions.map(perm => <Badge key={perm} variant="outline">{perm}</Badge>)
-                                             : <span className="text-muted-foreground text-sm">No specific permissions listed.</span>
-                                            }
+                                <AccordionItem value="repo-info" className="border-b border-border">
+                                    <AccordionTrigger className="text-lg font-semibold hover:no-underline">Repository Information</AccordionTrigger>
+                                    <AccordionContent className="space-y-4 pt-2 pl-2">
+                                        <div className="flex items-center space-x-2">
+                                           <strong className="w-24">Role:</strong>
+                                           <Badge variant="secondary">{selectedContributor.roleInfo.role}</Badge>
                                         </div>
-                                        <Separator className="my-3"/>
-                                        <h4 className="font-medium">Activities (from /contributors endpoint):</h4>
-                                        <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
-                                             {/* <li><GitPullRequest className="inline h-4 w-4 mr-1"/>Pull Requests: {selectedContributor.activities.pullRequests}</li> */}
-                                             <li><GitCommit className="inline h-4 w-4 mr-1"/>Contributions: {selectedContributor.activities.commits}</li>
-                                             {/* <li><MessageSquare className="inline h-4 w-4 mr-1"/>Issues Opened: {selectedContributor.activities.issuesOpened}</li> */}
-                                        </ul>
-                                        <p className='text-xs text-muted-foreground'>(Note: Detailed PR/Issue counts require more API calls and are omitted for simplicity.)</p>
+                                        <div className="flex items-start space-x-2">
+                                            <strong className="w-24 pt-0.5">Permissions:</strong>
+                                            <div className="flex flex-wrap gap-1">
+                                                {selectedContributor.roleInfo.permissions.length > 0 ?
+                                                 selectedContributor.roleInfo.permissions.map(perm => <Badge key={perm} variant="outline" className="text-xs">{perm}</Badge>)
+                                                 : <span className="text-sm text-muted-foreground">No specific permissions listed.</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <Separator className="my-4"/>
+                                        <h4 className="font-medium text-base">Contribution Activity:</h4>
+                                        <div className="flex items-center space-x-2 text-sm">
+                                            <GitCommit className="inline h-4 w-4 text-muted-foreground"/>
+                                            <span>Contributions:</span>
+                                            <span className="font-semibold">{selectedContributor.activities.commits}</span>
+                                        </div>
+                                        <p className='text-xs text-muted-foreground pt-1'>
+                                            (Note: Detailed PR/Issue counts require more complex API queries and are currently omitted.)
+                                        </p>
                                     </AccordionContent>
                                 </AccordionItem>
 
                                 {/* External Info */}
-                                <AccordionItem value="external-info">
-                                    <AccordionTrigger className="text-lg font-semibold">Other Public Repositories ({selectedContributor.externalRepos.length > 0 ? selectedContributor.externalRepos.length : 0})</AccordionTrigger>
-                                    <AccordionContent className="space-y-3 pl-2">
+                                <AccordionItem value="external-info" className="border-b border-border">
+                                    <AccordionTrigger className="text-lg font-semibold hover:no-underline">Other Public Repos ({selectedContributor.externalRepos.length})</AccordionTrigger>
+                                    <AccordionContent className="pt-2 pl-2">
                                         {selectedContributor.externalRepos.length > 0 ? (
                                             <ul className="space-y-2">
                                                 {selectedContributor.externalRepos.map(repo => (
-                                                    <li key={repo.url} className="flex items-center justify-between text-sm">
-                                                       <div className="flex items-center gap-2">
-                                                          <Building className="h-4 w-4 text-muted-foreground"/>
-                                                          <a href={repo.url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-accent truncate max-w-[300px]" title={repo.name}>
-                                                              {repo.name} <ExternalLink className="inline h-3 w-3 ml-1"/>
-                                                           </a>
+                                                    <li key={repo.url} className="flex items-center justify-between text-sm space-x-2 py-1">
+                                                       <div className="flex items-center gap-2 min-w-0">
+                                                          <Building className="h-4 w-4 text-muted-foreground flex-shrink-0"/>
+                                                          <a href={repo.url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-accent truncate" title={repo.name}>
+                                                              {repo.name}
+                                                          </a>
+                                                          <ExternalLink className="inline h-3 w-3 ml-1 text-muted-foreground flex-shrink-0"/>
                                                         </div>
-                                                        <Badge variant="outline" className="flex-shrink-0 ml-2">{repo.role}</Badge>
+                                                        <Badge variant="outline" className="flex-shrink-0 text-xs">{repo.role}</Badge>
                                                     </li>
                                                 ))}
-                                                <p className='text-xs text-muted-foreground pt-2'>(Showing up to 5 most recently updated public repos.)</p>
+                                                <p className='text-xs text-muted-foreground pt-3'>(Showing up to 5 most recently updated public repos contributor has interacted with.)</p>
                                             </ul>
                                         ) : (
-                                            <p className="text-muted-foreground">No other public repository information readily available.</p>
+                                            <p className="text-sm text-muted-foreground">No other relevant public repository information found.</p>
                                         )}
                                     </AccordionContent>
                                 </AccordionItem>
 
                                 {/* Personal Info */}
-                                <AccordionItem value="personal-info">
-                                    <AccordionTrigger className="text-lg font-semibold">Personal Information</AccordionTrigger>
-                                    <AccordionContent className="space-y-3 pl-2">
-                                         <h4 className="font-medium flex items-center gap-2"><Mail className="h-4 w-4"/> Public Emails:</h4>
+                                <AccordionItem value="personal-info" className="border-b-0">
+                                    <AccordionTrigger className="text-lg font-semibold hover:no-underline">Personal Information</AccordionTrigger>
+                                    <AccordionContent className="space-y-3 pt-2 pl-2">
+                                         <div className="flex items-center space-x-2">
+                                            <Mail className="h-4 w-4 text-muted-foreground"/>
+                                            <h4 className="font-medium text-base"> Public Email:</h4>
+                                         </div>
                                          {selectedContributor.emails.length > 0 ? (
-                                            <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
+                                            <ul className="list-disc pl-6 space-y-1 text-sm text-muted-foreground">
                                                 {selectedContributor.emails.map(email => <li key={email}>{email}</li>)}
                                             </ul>
                                         ) : (
-                                             <p className="text-muted-foreground">No public emails found.</p>
+                                             <p className="text-sm text-muted-foreground pl-6">No public email found.</p>
                                         )}
                                         {/* Add more personal info sections here if available from API */}
+                                         <Separator className="my-4"/>
+                                         <div className="flex items-center space-x-2">
+                                            <Github className="h-4 w-4 text-muted-foreground"/>
+                                            <a href={`https://github.com/${selectedContributor.username}`} target="_blank" rel="noopener noreferrer" className="text-sm hover:underline hover:text-accent">
+                                                 View Profile on GitHub <ExternalLink className="inline h-3 w-3 ml-1"/>
+                                            </a>
+                                          </div>
                                     </AccordionContent>
                                 </AccordionItem>
                             </Accordion>
                         </ScrollArea>
                     ) : (
-                        <div className="h-[400px] flex items-center justify-center text-muted-foreground">
+                        <div className="h-[450px] flex items-center justify-center text-muted-foreground border border-dashed rounded-md">
                             <p>Select a contributor to view details.</p>
                         </div>
                     )}
@@ -280,13 +331,27 @@ export default function Home() {
          </div>
       )}
 
-        {!isLoading && contributors.length === 0 && form.formState.isSubmitted && !form.formState.isSubmitting && (
-            <Card className="w-full max-w-4xl mt-8 shadow-md">
-                <CardContent className="pt-6 text-center text-muted-foreground">
-                    No contributors found for the specified repository, or an error occurred during fetching. Please check the details and try again.
-                </CardContent>
-            </Card>
+        {/* Display message when submitted but no results found and no loading */}
+        {!isLoading && form.formState.isSubmitted && contributors.length === 0 && !errorOccurred && (
+             <Alert variant="default" className="mt-8 w-full max-w-4xl shadow-md border border-border">
+               <Info className="h-4 w-4" />
+               <AlertTitle>No Contributors Found</AlertTitle>
+               <AlertDescription>
+                 No contributors were found for "{repoName}". This could be because the repository is empty, private (and the token lacks access), or uses a different contribution model.
+               </AlertDescription>
+             </Alert>
         )}
+
+        {/* Display message when an error occurred */}
+         {!isLoading && errorOccurred && (
+              <Alert variant="destructive" className="mt-8 w-full max-w-4xl shadow-md">
+                <Info className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>
+                  Failed to fetch contributor data for "{repoName}". Please check the repository name/link, ensure your GitHub token is valid and has the necessary permissions, and verify your network connection. See console for more details.
+                </AlertDescription>
+              </Alert>
+         )}
 
 
     </div>

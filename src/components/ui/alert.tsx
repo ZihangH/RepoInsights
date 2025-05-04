@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Info, AlertTriangle } from "lucide-react" // Added Info and AlertTriangle
 
 import { cn } from "@/lib/utils"
 
@@ -8,7 +9,7 @@ const alertVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-background text-foreground",
+        default: "bg-background text-foreground border-border [&>svg]:text-primary", // Added border and icon color
         destructive:
           "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
       },
@@ -22,14 +23,21 @@ const alertVariants = cva(
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
-  <div
-    ref={ref}
-    role="alert"
-    className={cn(alertVariants({ variant }), className)}
-    {...props}
-  />
-))
+>(({ className, variant, children, ...props }, ref) => {
+  const Icon = variant === "destructive" ? AlertTriangle : Info; // Choose icon based on variant
+
+  return (
+    <div
+      ref={ref}
+      role="alert"
+      className={cn(alertVariants({ variant }), className)}
+      {...props}
+    >
+      <Icon className="h-4 w-4" /> {/* Render the appropriate icon */}
+      {children}
+    </div>
+  )
+})
 Alert.displayName = "Alert"
 
 const AlertTitle = React.forwardRef<
