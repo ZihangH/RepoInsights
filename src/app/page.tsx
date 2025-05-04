@@ -72,45 +72,29 @@ export default function Home() {
 
 
     try {
-      // Simulate API call for now
-      // const data = await getRepoContributors(repoName, values.token);
-      // Replace with actual API call when implemented
-       const data = await new Promise<ContributorInfo[]>(resolve => setTimeout(() => resolve([
-        {
-          username: 'octocat',
-          roleInfo: { role: 'Owner', permissions: ['admin', 'read', 'write'] },
-          activities: { pullRequests: 25, commits: 150, issuesOpened: 5 },
-          externalRepos: [
-            { name: 'Spoon-Knife', url: 'https://github.com/octocat/Spoon-Knife', role: 'Owner' },
-            { name: 'linguist', url: 'https://github.com/github/linguist', role: 'Contributor' }
-          ],
-          emails: ['octocat@github.com']
-        },
-         {
-          username: 'hubot',
-          roleInfo: { role: 'Collaborator', permissions: ['read', 'write'] },
-          activities: { pullRequests: 10, commits: 50, issuesOpened: 2 },
-          externalRepos: [
-             { name: 'hubot-scripts', url: 'https://github.com/github/hubot-scripts', role: 'Maintainer' }
-           ],
-          emails: ['hubot@github.com', 'support@github.com']
-         },
-       ]), 1500));
+      // Call the actual service function to fetch data from GitHub API
+      const data = await getRepoContributors(repoName, values.token);
 
       if (data.length === 0) {
          toast({
              title: "No Contributors Found",
-             description: "Could not find any contributors for this repository.",
+             description: "Could not find any contributors for this repository, or the repository might be private/inaccessible with the provided token.",
+             variant: "default" // Use default variant for informational messages
          });
       }
 
       setContributors(data);
+      // Select the first contributor by default if data is found
+      if (data.length > 0) {
+          setSelectedContributor(data[0]);
+      }
+
     } catch (error) {
       console.error('Error fetching contributors:', error);
       toast({
         variant: 'destructive',
-        title: 'Error',
-        description: 'Failed to fetch contributor data. Please check the repository name, token, and your network connection.',
+        title: 'Error Fetching Data',
+        description: error instanceof Error ? error.message : 'Failed to fetch contributor data. Please check the repository name, token, permissions, and your network connection.',
       });
     } finally {
       setIsLoading(false);
@@ -154,7 +138,7 @@ export default function Home() {
                       <Input type="password" placeholder="Enter your GitHub Personal Access Token" {...field} />
                     </FormControl>
                      <FormDescription>
-                      A token with 'repo' scope might be needed for private repositories. Your token is used only for this request and is not stored.
+                       A Personal Access Token (classic or fine-grained) with 'repo' scope (or specific read access to the target repository) is required. Your token is used only for this request and is not stored.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -228,21 +212,25 @@ export default function Home() {
                                         <p><strong>Role:</strong> <Badge variant="secondary">{selectedContributor.roleInfo.role}</Badge></p>
                                         <p><strong>Permissions:</strong></p>
                                         <div className="flex flex-wrap gap-1">
-                                            {selectedContributor.roleInfo.permissions.map(perm => <Badge key={perm} variant="outline">{perm}</Badge>)}
+                                            {selectedContributor.roleInfo.permissions.length > 0 ?
+                                             selectedContributor.roleInfo.permissions.map(perm => <Badge key={perm} variant="outline">{perm}</Badge>)
+                                             : <span className="text-muted-foreground text-sm">No specific permissions listed.</span>
+                                            }
                                         </div>
                                         <Separator className="my-3"/>
-                                        <h4 className="font-medium">Activities:</h4>
+                                        <h4 className="font-medium">Activities (from /contributors endpoint):</h4>
                                         <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
-                                             <li><GitPullRequest className="inline h-4 w-4 mr-1"/>Pull Requests: {selectedContributor.activities.pullRequests}</li>
-                                             <li><GitCommit className="inline h-4 w-4 mr-1"/>Commits: {selectedContributor.activities.commits}</li>
-                                             <li><MessageSquare className="inline h-4 w-4 mr-1"/>Issues Opened: {selectedContributor.activities.issuesOpened}</li>
+                                             {/* <li><GitPullRequest className="inline h-4 w-4 mr-1"/>Pull Requests: {selectedContributor.activities.pullRequests}</li> */}
+                                             <li><GitCommit className="inline h-4 w-4 mr-1"/>Contributions: {selectedContributor.activities.commits}</li>
+                                             {/* <li><MessageSquare className="inline h-4 w-4 mr-1"/>Issues Opened: {selectedContributor.activities.issuesOpened}</li> */}
                                         </ul>
+                                        <p className='text-xs text-muted-foreground'>(Note: Detailed PR/Issue counts require more API calls and are omitted for simplicity.)</p>
                                     </AccordionContent>
                                 </AccordionItem>
 
                                 {/* External Info */}
                                 <AccordionItem value="external-info">
-                                    <AccordionTrigger className="text-lg font-semibold">External Repositories ({selectedContributor.externalRepos.length})</AccordionTrigger>
+                                    <AccordionTrigger className="text-lg font-semibold">Other Public Repositories ({selectedContributor.externalRepos.length > 0 ? selectedContributor.externalRepos.length : 0})</AccordionTrigger>
                                     <AccordionContent className="space-y-3 pl-2">
                                         {selectedContributor.externalRepos.length > 0 ? (
                                             <ul className="space-y-2">
@@ -250,16 +238,17 @@ export default function Home() {
                                                     <li key={repo.url} className="flex items-center justify-between text-sm">
                                                        <div className="flex items-center gap-2">
                                                           <Building className="h-4 w-4 text-muted-foreground"/>
-                                                          <a href={repo.url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-accent">
+                                                          <a href={repo.url} target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-accent truncate max-w-[300px]" title={repo.name}>
                                                               {repo.name} <ExternalLink className="inline h-3 w-3 ml-1"/>
                                                            </a>
                                                         </div>
-                                                        <Badge variant="outline">{repo.role}</Badge>
+                                                        <Badge variant="outline" className="flex-shrink-0 ml-2">{repo.role}</Badge>
                                                     </li>
                                                 ))}
+                                                <p className='text-xs text-muted-foreground pt-2'>(Showing up to 5 most recently updated public repos.)</p>
                                             </ul>
                                         ) : (
-                                            <p className="text-muted-foreground">No external repository information available.</p>
+                                            <p className="text-muted-foreground">No other public repository information readily available.</p>
                                         )}
                                     </AccordionContent>
                                 </AccordionItem>
@@ -291,10 +280,10 @@ export default function Home() {
          </div>
       )}
 
-        {!isLoading && contributors.length === 0 && form.formState.isSubmitted && (
+        {!isLoading && contributors.length === 0 && form.formState.isSubmitted && !form.formState.isSubmitting && (
             <Card className="w-full max-w-4xl mt-8 shadow-md">
                 <CardContent className="pt-6 text-center text-muted-foreground">
-                    No contributors found for the specified repository, or an error occurred.
+                    No contributors found for the specified repository, or an error occurred during fetching. Please check the details and try again.
                 </CardContent>
             </Card>
         )}
